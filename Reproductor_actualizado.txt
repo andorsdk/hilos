@@ -1,0 +1,97 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+
+#define BUFFER_SIZE 256
+
+// Función que simula la reproducción de un archivo de audio
+void reproducir_audio(const char* archivo, int pipe_fd[2]) {
+    close(pipe_fd[0]);  // Cerrar el extremo de lectura de la tubería en el proceso hijo
+    printf("Reproduciendo archivo: %s\n", archivo);
+    sleep(5);  // Simula el tiempo de reproducción
+    printf("Finalizó la reproducción del archivo: %s\n", archivo);
+
+    // Enviar mensaje al proceso padre indicando que se ha terminado la reproducción
+    char mensaje[BUFFER_SIZE];
+    snprintf(mensaje, sizeof(mensaje), "Finalizó la reproducción del archivo: %s\n", archivo);
+    if (write(pipe_fd[1], mensaje, sizeof(mensaje)) == -1) {
+        perror("Error escribiendo en la tubería");
+    }
+
+    close(pipe_fd[1]);  // Cerrar el extremo de escritura de la tubería en el hijo
+}
+
+int main() {
+    int pipe_fd1[2], pipe_fd2[2];
+    pid_t pid_audio1, pid_audio2;
+
+    // Crear las tuberías
+    if (pipe(pipe_fd1) == -1 || pipe(pipe_fd2) == -1) {
+        perror("Error creando las tuberías");
+        exit(1);
+    }
+
+    // Primer proceso hijo para reproducir el primer archivo de audio
+    pid_audio1 = fork();
+    if (pid_audio1 == -1) {
+        perror("Error creando proceso hijo 1");
+        exit(1);
+    }
+
+    if (pid_audio1 == 0) {
+        // Código del proceso hijo para reproducir el primer archivo
+        reproducir_audio("audio1.mp3", pipe_fd1);
+        exit(0);
+    }
+
+    // Segundo proceso hijo para reproducir el segundo archivo de audio
+    pid_audio2 = fork();
+    if (pid_audio2 == -1) {
+        perror("Error creando proceso hijo 2");
+        exit(1);
+    }
+
+    if (pid_audio2 == 0) {
+        // Código del proceso hijo para reproducir el segundo archivo
+        reproducir_audio("audio2.mp3", pipe_fd2);
+        exit(0);
+    }
+
+    // Código del proceso padre
+    close(pipe_fd1[1]);  // Cerrar el extremo de escritura de la tubería 1 en el padre
+    close(pipe_fd2[1]);  // Cerrar el extremo de escritura de la tubería 2 en el padre
+
+    char buffer1[BUFFER_SIZE], buffer2[BUFFER_SIZE];
+
+    // Leer los mensajes de finalización de ambos procesos hijos
+    if (read(pipe_fd1[0], buffer1, sizeof(buffer1)) > 0) {
+        printf("%s", buffer1);
+    } else {
+        perror("Error leyendo de la tubería 1");
+    }
+
+    if (read(pipe_fd2[0], buffer2, sizeof(buffer2)) > 0) {
+        printf("%s", buffer2);
+    } else {
+        perror("Error leyendo de la tubería 2");
+    }
+
+    // Cerrar los extremos de lectura de las tuberías en el padre
+    close(pipe_fd1[0]);
+    close(pipe_fd2[0]);
+
+    // Esperar a que los procesos hijos terminen
+    waitpid(pid_audio1, NULL, 0);  // Recolectar primer proceso hijo
+    waitpid(pid_audio2, NULL, 0);  // Recolectar segundo proceso hijo
+
+    return 0;
+}
+
+/* Comentarios:
+-Se cambió el codigo en su totalidad a tipos de tuberías
+-Se cerraron extremos de tuberias no utilizados
+-Se comprobaron erroes en los apartados de read y write
+-Se añadieron comentarios explicuando que hace cada cosa
+*/

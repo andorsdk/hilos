@@ -1,0 +1,145 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <errno.h>
+
+#define BUFFER_SIZE 256
+
+// Función que monitoriza la CPU y envía datos a través de la tubería
+void monitorizar_cpu(int pipe_fd[2]) {
+    close(pipe_fd[0]);  // Cerrar el extremo de lectura en el hijo
+
+    while (1) {
+        FILE* fp = fopen("/proc/stat", "r");
+        if (fp) {
+            char buffer[BUFFER_SIZE];
+            fgets(buffer, sizeof(buffer), fp);  // Leer la primera línea que tiene info de la CPU
+
+            // Escribir en la tubería
+            if (write(pipe_fd[1], buffer, strlen(buffer) + 1) == -1) {
+                perror("Error escribiendo en la tubería");
+                fclose(fp);
+                exit(1);
+            }
+
+            fclose(fp);
+        } else {
+            perror("Error abriendo /proc/stat");
+            exit(1);
+        }
+
+        sleep(1);  // Esperar 1 segundo antes de la siguiente lectura
+    }
+
+    close(pipe_fd[1]);  // Cerrar el extremo de escritura en el hijo
+    exit(0);  // Terminar el proceso hijo cuando se desee
+}
+
+// Función que monitoriza la memoria y envía datos a través de la tubería
+void monitorizar_memoria(int pipe_fd[2]) {
+    close(pipe_fd[0]);  // Cerrar el extremo de lectura en el hijo
+
+    while (1) {
+        FILE* fp = fopen("/proc/meminfo", "r");
+        if (fp) {
+            char buffer[BUFFER_SIZE];
+            fgets(buffer, sizeof(buffer), fp);  // Leer la primera línea que tiene info de la memoria
+
+            // Escribir en la tubería
+            if (write(pipe_fd[1], buffer, strlen(buffer) + 1) == -1) {
+                perror("Error escribiendo en la tubería");
+                fclose(fp);
+                exit(1);
+            }
+
+            fclose(fp);
+        } else {
+            perror("Error abriendo /proc/meminfo");
+            exit(1);
+        }
+
+        sleep(1);  // Esperar 1 segundo antes de la siguiente lectura
+    }
+
+    close(pipe_fd[1]);  // Cerrar el extremo de escritura en el hijo
+    exit(0);  // Terminar el proceso hijo cuando se desee
+}
+
+int main() {
+    int pipe_cpu[2], pipe_mem[2];
+    pid_t pid_cpu, pid_mem;
+
+    // Crear las tuberías
+    if (pipe(pipe_cpu) == -1 || pipe(pipe_mem) == -1) {
+        perror("Error creando las tuberías");
+        exit(1);
+    }
+
+    // Crear el proceso hijo para monitorizar la CPU
+    pid_cpu = fork();
+    if (pid_cpu == -1) {
+        perror("Error creando proceso hijo para CPU");
+        exit(1);
+    }
+
+    if (pid_cpu == 0) {
+        // Código del proceso hijo que monitoriza la CPU
+        monitorizar_cpu(pipe_cpu);
+    }
+
+    // Crear el proceso hijo para monitorizar la memoria
+    pid_mem = fork();
+    if (pid_mem == -1) {
+        perror("Error creando proceso hijo para memoria");
+        exit(1);
+    }
+
+    if (pid_mem == 0) {
+        // Código del proceso hijo que monitoriza la memoria
+        monitorizar_memoria(pipe_mem);
+    }
+
+    // Código del proceso padre
+    close(pipe_cpu[1]);  // Cerrar el extremo de escritura de la tubería de CPU en el padre
+    close(pipe_mem[1]);  // Cerrar el extremo de escritura de la tubería de memoria en el padre
+
+    char buffer_cpu[BUFFER_SIZE], buffer_mem[BUFFER_SIZE];
+
+    while (1) {
+        // Leer la información de la CPU desde la tubería
+        if (read(pipe_cpu[0], buffer_cpu, sizeof(buffer_cpu)) > 0) {
+            printf("CPU Usage: %s", buffer_cpu);
+        } else {
+            perror("Error leyendo de la tubería de CPU");
+        }
+
+        // Leer la información de la memoria desde la tubería
+        if (read(pipe_mem[0], buffer_mem, sizeof(buffer_mem)) > 0) {
+            printf("Memoria: %s", buffer_mem);
+        } else {
+            perror("Error leyendo de la tubería de memoria");
+        }
+
+        sleep(1);  // Controlar la frecuencia de actualización de la información
+    }
+
+    // Cerrar los extremos de lectura de las tuberías en el padre
+    close(pipe_cpu[0]);
+    close(pipe_mem[0]);
+
+    // Esperar a que los procesos hijos terminen (aunque en este caso corren indefinidamente)
+    waitpid(pid_cpu, NULL, 0);
+    waitpid(pid_mem, NULL, 0);
+
+    return 0;
+}
+
+/*Comentarios:
+-Se cerraron las tuberías no utilizadas
+-Se mejoró el control de errores en read y write
+-Se sincronizaron algunos procesos
+-Se logró filtrar solo información relevante
+
+*/
